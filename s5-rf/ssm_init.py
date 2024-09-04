@@ -76,6 +76,7 @@ def make_DPLR_HiPPO(N):
 def init_A(block_size: int, num_blocks: int) -> tuple[jax.Array, jax.Array, jax.Array]:
     """
     Initialize the A matrix for the SSM.
+    From https://github.com/lindermanlab/S5/blob/main/s5/ssm_init.py
     Args:
         N (int): state size
         num_blocks (int): number of blocks
@@ -99,6 +100,7 @@ def init_A(block_size: int, num_blocks: int) -> tuple[jax.Array, jax.Array, jax.
 def log_step_initializer(dt_min=0.001, dt_max=0.1):
     """ Initialize the learnable timescale Delta by sampling
          uniformly between dt_min and dt_max.
+         From https://github.com/lindermanlab/S5/blob/main/s5/ssm_init.py
          Args:
              dt_min (float32): minimum value
              dt_max (float32): maximum value
@@ -122,6 +124,7 @@ def log_step_initializer(dt_min=0.001, dt_max=0.1):
 
 def init_log_steps(key, input):
     """ Initialize an array of learnable timescale parameters
+        From https://github.com/lindermanlab/S5/blob/main/s5/ssm_init.py
          Args:
              key: jax random key
              input: tuple containing the array shape H and
@@ -145,6 +148,7 @@ def init_VinvB(init_fun, rng, shape, Vinv):
     """ Initialize B_tilde=V^{-1}B. First samples B. Then compute V^{-1}B.
         Note we will parameterize this with two different matrices for complex
         numbers.
+        From https://github.com/lindermanlab/S5/blob/main/s5/ssm_init.py
          Args:
              init_fun:  the initialization function to use, e.g. lecun_normal()
              rng:       jax random key to be used with init function.
@@ -162,6 +166,7 @@ def init_VinvB(init_fun, rng, shape, Vinv):
 
 def trunc_standard_normal(key, shape):
     """ Sample C with a truncated normal distribution with standard deviation 1.
+         From https://github.com/lindermanlab/S5/blob/main/s5/ssm_init.py
          Args:
              key: jax random key
              shape (tuple): desired shape, of length 3, (H,P,_)
@@ -182,6 +187,7 @@ def init_CV(init_fun, rng, shape, V):
     """ Initialize C_tilde=CV. First sample C. Then compute CV.
         Note we will parameterize this with two different matrices for complex
         numbers.
+        From https://github.com/lindermanlab/S5/blob/main/s5/ssm_init.py
          Args:
              init_fun:  the initialization function to use, e.g. lecun_normal()
              rng:       jax random key to be used with init function.

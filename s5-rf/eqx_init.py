@@ -6,6 +6,9 @@ from typing import Callable
 
 
 def init_weights(linear: nn.Linear, init: Callable, rng_key, zero_bias:bool=True) -> nn.Linear:
+    """
+    General function to initialize a linear layer 
+    """
     weight_key, bias_key = jax.random.split(rng_key, num=2)
 
     weight_shape = linear.weight.shape

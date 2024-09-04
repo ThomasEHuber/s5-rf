@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 import equinox.nn as nn
-from resonator_s5.resonator import RF, RFDense, LI, RadialNorm
+from resonator_s5.resonator import RF, RFDense, LI
 from ssm_init import init_A
 
 class Classifier(eqx.Module):

@@ -33,12 +33,6 @@ def spike_surrgat_tanh(k: float=1.) -> Callable:
     return add_surrogat_gradient(heaviside, grad_tanh)
 
 
-# def spike(re: jax.Array, im: jax.Array, im_del: jax.Array) -> jax.Array:
-#     act_fn = spike_surrgat_tanh()
-#     return act_fn(re-1.0)*act_fn(im)*jax.lax.stop_gradient(act_fn(-im_del)) 
-
-
-
 def spike_surrogat_multi_gaussian(h: float=0.15, sigma: float=0.5, s: float=6.) -> Callable:
     """
     implements multi gaussians as surrogat gradient:
@@ -57,6 +51,10 @@ def shift_right(x: jax.Array) -> jax.Array:
 
 
 def cartesian_spike(x: jax.Array) -> jax.Array:
+    """
+    Spike activation based on cartesian coordinates.
+    Spikes everytime the real number line has been crossed with a value larger than the threshold 0.1
+    """
     re = x.real
     im = x.imag
     im_del = jax.vmap(shift_right)(x.imag)
@@ -65,9 +63,13 @@ def cartesian_spike(x: jax.Array) -> jax.Array:
 
 
 def polar_spike(x: jax.Array) -> jax.Array:
+    """
+    Spike activation based on polar coordinates.
+    Spikes everytime the real number line has been crossed with a value larger than the threshold 0.1
+    """
     r = jnp.abs(x)
     theta = jnp.angle(x)
     theta_del = jax.vmap(shift_right)(theta)
-    act_fn = spike_surrgat_tanh()
-    return act_fn(r-1.)*act_fn(theta)*jax.lax.stop_gradient(act_fn(-theta_del)) 
+    act_fn = spike_surrogat_multi_gaussian()
+    return act_fn(r-0.1)*act_fn(theta)*jax.lax.stop_gradient(act_fn(-theta_del)) 
 
