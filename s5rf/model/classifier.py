@@ -2,8 +2,8 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 import equinox.nn as nn
-from resonator_s5.resonator import RF, RFDense, LI
-from ssm_init import init_A
+from .resonator import RF, RFDense, LI
+from ..util.ssm_init import init_A
 
 class Classifier(eqx.Module):
     dense_layers: list[RFDense]
@@ -47,7 +47,7 @@ class Classifier(eqx.Module):
             Lambda, V, Vinv = init_A(int(neurons/blocks), blocks)
             if v_pos in ["before_spike"]:
                 dense_V = jnp.eye(prev_V.shape[0])
-                neuron_V = V
+                neuron_V = V if discretization == "zoh" and i == 0 else jnp.eye(V.shape[0])
             elif v_pos in ["after_spike"]:
                 dense_V = prev_V
                 neuron_V = jnp.eye(V.shape[0])

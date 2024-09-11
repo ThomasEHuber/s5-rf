@@ -1,4 +1,4 @@
-from resonator_s5.optax_helper import init_optimizer
+from ..model.classifier import Classifier
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -11,6 +11,36 @@ from functools import partial
 
 import wandb
 from tqdm import tqdm
+
+
+def init_optimizer(model: Classifier, standard_lr: float, ssm_lr: float, weight_decay: float, decay_steps: int) -> tuple[optax.GradientTransformation, optax.OptState]: 
+    param_spec = jax.tree.map(lambda _: "standard", model) # every jax.Array is associated with label "standard"
+        
+    def where_params_with_different_lr(pytree: Classifier) -> list[jax.Array]:
+        params = []
+        for neuron_layer in pytree.neuron_layers:
+            params.append(neuron_layer.Lambda)
+            params.append(neuron_layer.log_step)
+        return params
+
+    param_spec = eqx.tree_at(
+        where_params_with_different_lr,     # returns params that should be associated with different label
+        param_spec,                         # the model with associated label
+        replace_fn=lambda _: "ssm"          # how the labels should change
+    )
+
+    standard_scheduler = optax.cosine_decay_schedule(standard_lr, decay_steps=decay_steps, alpha=1e-6)
+    ssm_scheduler = optax.cosine_decay_schedule(ssm_lr, decay_steps=decay_steps, alpha=1e-6)
+
+    optim = optax.multi_transform(
+        {
+            "standard": optax.inject_hyperparams(optax.adamw)(learning_rate=standard_scheduler, weight_decay=weight_decay),    # adamw: applies weight decay
+            "ssm": optax.inject_hyperparams(optax.adam)(learning_rate=ssm_scheduler)                # adam: no weight decay
+        },
+        param_spec
+    )
+    opt_state = optim.init(eqx.filter(model, eqx.is_inexact_array))
+    return optim, opt_state
 
 
 def loss_fn(model: Classifier, train_key, x: jax.Array, y: jax.Array):
@@ -191,11 +221,13 @@ def train(
         optim, 
         opt_state,
         apply_cutmix:bool,
+        use_wandb:bool,
         wandb_project: str,
     ) -> Classifier:
     from IPython.display import clear_output
 
-    wandb.init(project=wandb_project)
+    if use_wandb:
+        wandb.init(project=wandb_project)
 
     track_layer = 0
     for epoch in range(epochs):
@@ -203,35 +235,37 @@ def train(
             clear_output(wait=True)
         print(f"Epoch: {epoch+1}/{epochs}")
         model, opt_state, train_metrics, val_metrics, test_metrics = train_epoch(model, train_dataloader, val_dataloader, test_dataloader, rng_key, optim, opt_state, track_layer, apply_cutmix)
+        
+        if use_wandb:
+            wandb.log({
+                "Train Loss": train_metrics['loss'], 
+                "Train Accuracy": train_metrics['accuracy'], 
+                "Val Loss": val_metrics['loss'], 
+                "Val Accuracy": val_metrics['accuracy'],
+                "Test Loss": test_metrics['loss'], 
+                "Test Accuracy": test_metrics['accuracy'],
+                "Max Lambda real": -jnp.exp(model.neuron_layers[track_layer].Lambda[...,0].min()),
+                "Min Lambda real": -jnp.exp(model.neuron_layers[track_layer].Lambda[...,0].max()),
+                "Max Lambda imag": model.neuron_layers[track_layer].Lambda[...,1].max(),
+                "Min Lambda imag": model.neuron_layers[track_layer].Lambda[...,1].min(),
+                "Max C real": model.dense_layers[track_layer].C[...,0].max(),
+                "Min C real": model.dense_layers[track_layer].C[...,0].min(),
+                "Max C imag": model.dense_layers[track_layer].C[...,1].max(),
+                "Min C imag": model.dense_layers[track_layer].C[...,1].min(),
+                "Max Delta": jnp.exp(model.neuron_layers[track_layer].log_step.max()),
+                "Min Delta": jnp.exp(model.neuron_layers[track_layer].log_step.min()),
+                "Val Num Spikes": val_metrics['num_spikes'], 
+                "Val Avg Spikes": val_metrics['avg_spikes'],
+                "Test Num Spikes": test_metrics['num_spikes'], 
+                "Test Avg Spikes": test_metrics['avg_spikes'],
+                "Learning Rate Standard": opt_state.inner_states['standard'].inner_state.hyperparams['learning_rate'],
+                "Learning Rate SSM": opt_state.inner_states['ssm'].inner_state.hyperparams['learning_rate'],
+                "Max Tau": jnp.exp(model.li.tau.max()),
+                "Min Tau": jnp.exp(model.li.tau.min()),
+                }
+            )
 
-        wandb.log({
-            "Train Loss": train_metrics['loss'], 
-            "Train Accuracy": train_metrics['accuracy'], 
-            "Val Loss": val_metrics['loss'], 
-            "Val Accuracy": val_metrics['accuracy'],
-            "Test Loss": test_metrics['loss'], 
-            "Test Accuracy": test_metrics['accuracy'],
-            "Max Lambda real": -jnp.exp(model.neuron_layers[track_layer].Lambda[...,0].min()),
-            "Min Lambda real": -jnp.exp(model.neuron_layers[track_layer].Lambda[...,0].max()),
-            "Max Lambda imag": model.neuron_layers[track_layer].Lambda[...,1].max(),
-            "Min Lambda imag": model.neuron_layers[track_layer].Lambda[...,1].min(),
-            "Max C real": model.dense_layers[track_layer].C[...,0].max(),
-            "Min C real": model.dense_layers[track_layer].C[...,0].min(),
-            "Max C imag": model.dense_layers[track_layer].C[...,1].max(),
-            "Min C imag": model.dense_layers[track_layer].C[...,1].min(),
-            "Max Delta": jnp.exp(model.neuron_layers[track_layer].log_step.max()),
-            "Min Delta": jnp.exp(model.neuron_layers[track_layer].log_step.min()),
-            "Val Num Spikes": val_metrics['num_spikes'], 
-            "Val Avg Spikes": val_metrics['avg_spikes'],
-            "Test Num Spikes": test_metrics['num_spikes'], 
-            "Test Avg Spikes": test_metrics['avg_spikes'],
-            "Learning Rate Standard": opt_state.inner_states['standard'].inner_state.hyperparams['learning_rate'],
-            "Learning Rate SSM": opt_state.inner_states['ssm'].inner_state.hyperparams['learning_rate'],
-            "Max Tau": jnp.exp(model.li.tau.max()),
-            "Min Tau": jnp.exp(model.li.tau.min()),
-            }
-        )
-
-
-    wandb.finish()
+    if use_wandb:
+        wandb.finish()
+    
     return model

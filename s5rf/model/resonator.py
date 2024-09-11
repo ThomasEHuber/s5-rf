@@ -4,9 +4,9 @@ import jax.numpy as jnp
 import equinox as eqx
 from jax.nn.initializers import lecun_normal, normal
 
-from ssm_init import init_CV, init_VinvB, init_log_steps, trunc_standard_normal, init_A
-from surrogat_gradient import cartesian_spike, polar_spike
-from resonator_s5.helpers import complex_to_real, real_to_complex, init_VinvCV
+from ..util.ssm_init import init_CV, init_VinvB, init_log_steps, trunc_standard_normal, init_A
+from ..util.surrogat_gradient import cartesian_spike, polar_spike
+from ..util.helpers import complex_to_real, real_to_complex, init_VinvCV
 
 
 # Discretization functions
@@ -46,7 +46,7 @@ def discretize_zoh(Lambda: jax.Array, B_tilde: jax.Array, Delta: jax.Array) -> t
     return Lambda_bar, B_bar
 
 
-def discretization_exact(Lambda: jax.Array, B_tilde: jax.Array, Delta: jax.Array) -> tuple[jax.Array, jax.Array]:
+def discretization_dirac(Lambda: jax.Array, B_tilde: jax.Array, Delta: jax.Array) -> tuple[jax.Array, jax.Array]:
     """ Discretize a diagonalized, continuous-time linear SSM
         using an exact solution based on spike/delta impulse inputs.
         Args:
@@ -158,7 +158,7 @@ class RF(eqx.Module):
         step = jnp.exp(self.log_step[:, 0])
 
         if self.discretization in ["exact"]:
-            disc_fn = discretization_exact
+            disc_fn = discretization_dirac
         elif self.discretization in ["zoh"]:
             disc_fn = discretize_zoh
         elif self.discretization in ["bilinear"]:
@@ -205,10 +205,10 @@ class RFDense(eqx.Module):
             if not bidirectional:
                 self.B = init_VinvCV(rng_key, trunc_standard_normal, V, Vinv)
             else:
-                C1_key, C2_key = jax.random.split(rng_key, num=2)
-                C1 = init_VinvCV(C1_key, trunc_standard_normal, V, Vinv)
-                C2 = init_VinvCV(C2_key, trunc_standard_normal, V, Vinv)
-                self.B = jnp.concat([C1, C2], axis=1)
+                B1_key, B2_key = jax.random.split(rng_key, num=2)
+                B1 = init_VinvCV(B1_key, trunc_standard_normal, V, Vinv)
+                B2 = init_VinvCV(B2_key, trunc_standard_normal, V, Vinv)
+                self.B = jnp.concat([B1, B2], axis=1)
 
 
     def __call__(self, x: jax.Array) -> jax.Array:

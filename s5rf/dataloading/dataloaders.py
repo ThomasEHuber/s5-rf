@@ -37,7 +37,7 @@ def bitreversal_permutation(n):
     return np.extract(perm < n, perm)
 
 
-def create_mnist_dataloaders(batch_size:int, num_classes:int, shuffle:bool, permute:bool) -> tuple[DataLoader, DataLoader, DataLoader]:
+def create_mnist_dataloaders(path:str, batch_size:int, permute:bool, shuffle:bool=True) -> tuple[DataLoader, DataLoader, DataLoader]:
     transform = [
         transforms.ToTensor(),
         torchvision.transforms.Lambda(lambda x: x.view(1, 28*28).t()),
@@ -49,9 +49,9 @@ def create_mnist_dataloaders(batch_size:int, num_classes:int, shuffle:bool, perm
     transform = transforms.Compose(transform)
 
     # Load the MNIST dataset
-    train_dataset = datasets.MNIST(root='../../data', train=True, download=True, transform=transform, target_transform=lambda y: torch.tensor(F.one_hot(y, num_classes), dtype=torch.long))
+    train_dataset = datasets.MNIST(root=path, train=True, download=True, transform=transform, target_transform=lambda y: torch.tensor(F.one_hot(y, 10), dtype=torch.long))
     train_dataset, val_dataset = torch.utils.data.random_split(train_dataset, [0.9, 0.1])
-    test_dataset = datasets.MNIST(root='../../data', train=False, download=True, transform=transform, target_transform=lambda y: torch.tensor(F.one_hot(y, num_classes), dtype=torch.long))
+    test_dataset = datasets.MNIST(root=path, train=False, download=True, transform=transform, target_transform=lambda y: torch.tensor(F.one_hot(y, 10), dtype=torch.long))
 
 
     train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)
@@ -60,7 +60,7 @@ def create_mnist_dataloaders(batch_size:int, num_classes:int, shuffle:bool, perm
     return train_dataloader, val_dataloader, test_dataloader
 
 
-def create_shd_dataloader(batch_size:int, num_classes:int, shuffle:bool, bins:int=250, downsample_size:int=140) -> tuple[DataLoader, DataLoader, DataLoader]:
+def create_shd_dataloaders(path:str, batch_size:int, shuffle:bool=True, bins:int=250, downsample_size:int=140) -> tuple[DataLoader, DataLoader, DataLoader]:
     shd_sensor_size = (700, 1, 1)
     pre_cache_transform = transforms.Compose([
         tonic.transforms.Downsample(sensor_size=shd_sensor_size, target_size=(downsample_size, 1)),
@@ -83,13 +83,13 @@ def create_shd_dataloader(batch_size:int, num_classes:int, shuffle:bool, bins:in
         torchvision.transforms.Lambda(lambda x: (x > 0).astype(np.int32)),
     ])
 
-    train_dataset = tonic.datasets.SHD(save_to="../../data", train=True, transform=pre_cache_transform)
+    train_dataset = tonic.datasets.SHD(save_to=path, train=True, transform=pre_cache_transform)
     train_dataset, val_dataset = torch.utils.data.random_split(train_dataset, [0.9, 0.1])
-    test_dataset = tonic.datasets.SHD(save_to="../../data", train=False, transform=pre_cache_transform)
+    test_dataset = tonic.datasets.SHD(save_to=path, train=False, transform=pre_cache_transform)
 
-    train_dataset = DiskCachedDataset(train_dataset, cache_path="../../data/tonic/cache/shd/train", transform=post_cache_train_transform, target_transform=lambda y: torch.tensor(F.one_hot(y, num_classes), dtype=torch.long))
-    val_dataset = DiskCachedDataset(val_dataset, cache_path="../../data/tonic/cache/shd/val", transform=post_cache_val_transform, target_transform=lambda y: torch.tensor(F.one_hot(y, num_classes), dtype=torch.long))
-    test_dataset = DiskCachedDataset(test_dataset, cache_path="../../data/tonic/cache/shd/test", transform=post_cache_val_transform, target_transform=lambda y: torch.tensor(F.one_hot(y, num_classes), dtype=torch.long))
+    train_dataset = DiskCachedDataset(train_dataset, cache_path=path + "/tonic/cache/shd/train", transform=post_cache_train_transform, target_transform=lambda y: torch.tensor(F.one_hot(y, 20), dtype=torch.long))
+    val_dataset = DiskCachedDataset(val_dataset, cache_path=path + "/tonic/cache/shd/val", transform=post_cache_val_transform, target_transform=lambda y: torch.tensor(F.one_hot(y, 20), dtype=torch.long))
+    test_dataset = DiskCachedDataset(test_dataset, cache_path=path + "/tonic/cache/shd/test", transform=post_cache_val_transform, target_transform=lambda y: torch.tensor(F.one_hot(y, 20), dtype=torch.long))
 
     train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)
     val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=shuffle)
@@ -97,7 +97,7 @@ def create_shd_dataloader(batch_size:int, num_classes:int, shuffle:bool, bins:in
     return train_dataloader, val_dataloader, test_dataloader
 
 
-def create_ssc_dataloader(batch_size:int, num_classes:int, shuffle:bool, bins:int=250, downsample_size:int=140) -> tuple[DataLoader, DataLoader, DataLoader]:
+def create_ssc_dataloaders(path:str, batch_size:int, shuffle:bool=True, bins:int=250, downsample_size:int=140) -> tuple[DataLoader, DataLoader, DataLoader]:
     shd_sensor_size = (700, 1, 1)
     pre_cache_transform = transforms.Compose([
         tonic.transforms.Downsample(sensor_size=shd_sensor_size, target_size=(downsample_size, 1)),
@@ -120,13 +120,13 @@ def create_ssc_dataloader(batch_size:int, num_classes:int, shuffle:bool, bins:in
         torchvision.transforms.Lambda(lambda x: (x > 0).astype(np.int32)),
     ])
 
-    train_dataset = tonic.datasets.SSC(save_to="../../data", split="train", transform=pre_cache_transform)
-    val_dataset = tonic.datasets.SSC(save_to="../../data", split="valid", transform=pre_cache_transform)
-    test_dataset = tonic.datasets.SSC(save_to="../../data", split="test", transform=pre_cache_transform)
+    train_dataset = tonic.datasets.SSC(save_to=path, split="train", transform=pre_cache_transform)
+    val_dataset = tonic.datasets.SSC(save_to=path, split="valid", transform=pre_cache_transform)
+    test_dataset = tonic.datasets.SSC(save_to=path, split="test", transform=pre_cache_transform)
 
-    train_dataset = DiskCachedDataset(train_dataset, cache_path="../../data/tonic/cache/ssc/train", transform=post_cache_train_transform, target_transform=lambda y: torch.tensor(F.one_hot(y, num_classes), dtype=torch.long))
-    val_dataset = DiskCachedDataset(val_dataset, cache_path="../../data/tonic/cache/ssc/val", transform=post_cache_val_transform, target_transform=lambda y: torch.tensor(F.one_hot(y, num_classes), dtype=torch.long))
-    test_dataset = DiskCachedDataset(test_dataset, cache_path="../../data/tonic/cache/ssc/test", transform=post_cache_val_transform, target_transform=lambda y: torch.tensor(F.one_hot(y, num_classes), dtype=torch.long))
+    train_dataset = DiskCachedDataset(train_dataset, cache_path=path + "/tonic/cache/ssc/train", transform=post_cache_train_transform, target_transform=lambda y: torch.tensor(F.one_hot(y, 35), dtype=torch.long))
+    val_dataset = DiskCachedDataset(val_dataset, cache_path=path + "/tonic/cache/ssc/val", transform=post_cache_val_transform, target_transform=lambda y: torch.tensor(F.one_hot(y, 35), dtype=torch.long))
+    test_dataset = DiskCachedDataset(test_dataset, cache_path=path + "/tonic/cache/ssc/test", transform=post_cache_val_transform, target_transform=lambda y: torch.tensor(F.one_hot(y, 35), dtype=torch.long))
 
     train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)
     val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=shuffle)

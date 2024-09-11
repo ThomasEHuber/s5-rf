@@ -76,7 +76,6 @@ def make_DPLR_HiPPO(N):
 def init_A(block_size: int, num_blocks: int) -> tuple[jax.Array, jax.Array, jax.Array]:
     """
     Initialize the A matrix for the SSM.
-    From https://github.com/lindermanlab/S5/blob/main/s5/ssm_init.py
     Args:
         N (int): state size
         num_blocks (int): number of blocks
