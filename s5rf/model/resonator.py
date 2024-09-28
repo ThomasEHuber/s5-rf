@@ -4,9 +4,9 @@ import jax.numpy as jnp
 import equinox as eqx
 from jax.nn.initializers import lecun_normal, normal
 
-from ..util.ssm_init import init_CV, init_VinvB, init_log_steps, trunc_standard_normal, init_A
-from ..util.surrogat_gradient import cartesian_spike, polar_spike
-from ..util.helpers import complex_to_real, real_to_complex, init_VinvCV
+from util.ssm_init import init_CV, init_VinvB, init_log_steps, trunc_standard_normal, init_A
+from util.surrogat_gradient import cartesian_spike, polar_spike
+from util.helpers import complex_to_real, real_to_complex, init_dense_VinvB
 
 
 # Discretization functions
@@ -57,9 +57,8 @@ def discretization_dirac(Lambda: jax.Array, B_tilde: jax.Array, Delta: jax.Array
             discretized Lambda_bar (complex64), B_bar (complex64)  (P,), (P,H)
     """
     Lambda_bar = jnp.exp(Lambda * Delta)
-    B_bar = B_tilde + 1j * jnp.zeros_like(B_tilde)
+    B_bar = (B_tilde + 0j) * Delta
     return Lambda_bar, B_bar
-
 
 
 # Parallel scan operations
@@ -78,7 +77,7 @@ def binary_operator(q_i: jax.Array, q_j: jax.Array) -> tuple[jax.Array, jax.Arra
     return A_j * A_i, A_j * b_i + b_j
 
 
-def apply_ssm(Lambda_bar: jax.Array, B_bar: jax.Array, u: jax.Array, bidirectional: bool) -> jax.Array:
+def apply_ssm(Lambda_bar: jax.Array, B_bar: jax.Array, u: jax.Array) -> jax.Array:
     """ Compute the LxH output of discretized SSM given an LxH input.
         From https://github.com/lindermanlab/S5/blob/main/s5/ssm.py
         Args:
@@ -97,11 +96,6 @@ def apply_ssm(Lambda_bar: jax.Array, B_bar: jax.Array, u: jax.Array, bidirection
 
     _, xs = jax.lax.associative_scan(binary_operator, (Lambda_elements, Bu_elements))
 
-    if bidirectional:
-        _, xs2 = jax.lax.associative_scan(binary_operator,
-                                          (Lambda_elements, Bu_elements),
-                                          reverse=True)
-        xs = jnp.concatenate((xs, xs2), axis=-1)
     return xs
 
 
@@ -114,7 +108,6 @@ class RF(eqx.Module):
     keep_imag: bool
     discretization: str
     activation: str
-    bidirectional: bool
     step_rescale: float
 
     def __init__(
@@ -122,12 +115,11 @@ class RF(eqx.Module):
         rng_key,
         Lambda: jax.Array,
         V: jax.Array,
-        dt_min: float,
-        dt_max: float,
+        eta_min: float,
+        eta_max: float,
         keep_imag: bool,
         discretization: str,
         activation: str,
-        bidirectional: bool,
         step_rescale: float = 1.0,
     ) -> None:
         # self.Lambda = Lambda
@@ -139,12 +131,11 @@ class RF(eqx.Module):
         self.Lambda = jnp.stack([Lambda_real, Lambda_imag], axis=-1)
 
         self.V = V
-        self.log_step = init_log_steps(rng_key, (V.shape[0], dt_min, dt_max))
+        self.log_step = init_log_steps(rng_key, (V.shape[0], eta_min, eta_max))
         
         self.keep_imag = keep_imag
         self.discretization = discretization
         self.activation = activation
-        self.bidirectional = bidirectional
         self.step_rescale = step_rescale
 
 
@@ -157,14 +148,14 @@ class RF(eqx.Module):
         Lambda_tilde = Lambda_real + 1j * Lambda_imag
         step = jnp.exp(self.log_step[:, 0])
 
-        if self.discretization in ["exact"]:
+        if self.discretization in ["dirac"]:
             disc_fn = discretization_dirac
         elif self.discretization in ["zoh"]:
             disc_fn = discretize_zoh
         elif self.discretization in ["bilinear"]:
             disc_fn = discretize_bilinear
         else:
-            raise NotImplementedError("discretization only supports: \"exact\", \"zoh\", and \"bilinear\".")
+            raise NotImplementedError("discretization only supports: \"dirac\", \"zoh\", and \"bilinear\".")
 
         Lambda_bar, B_bar = disc_fn(Lambda_tilde, jnp.eye(Lambda_tilde.shape[0]), step)
         
@@ -172,7 +163,6 @@ class RF(eqx.Module):
             Lambda_bar,
             B_bar,
             u,
-            self.bidirectional
         )
 
         xs = jax.vmap(lambda x: self.V @ x)(xs)
@@ -196,19 +186,13 @@ class RFDense(eqx.Module):
     def __init__(
             self,
             rng_key,
-            V: jax.Array,
+            in_dim:int, 
+            out_dim:int,
             Vinv: jax.Array,
-            bidirectional: bool,
-            keep_imag: bool,
+            keep_imag: bool
         ) -> None:
             self.keep_imag = keep_imag
-            if not bidirectional:
-                self.B = init_VinvCV(rng_key, trunc_standard_normal, V, Vinv)
-            else:
-                B1_key, B2_key = jax.random.split(rng_key, num=2)
-                B1 = init_VinvCV(B1_key, trunc_standard_normal, V, Vinv)
-                B2 = init_VinvCV(B2_key, trunc_standard_normal, V, Vinv)
-                self.B = jnp.concat([B1, B2], axis=1)
+            self.B = init_dense_VinvB(rng_key, trunc_standard_normal, in_dim, out_dim, Vinv)
 
 
     def __call__(self, x: jax.Array) -> jax.Array:
@@ -230,7 +214,9 @@ class LI(eqx.Module):
     dim: int
 
     def __init__(self, dim: int) -> None:
-        self.tau = jnp.log(jnp.array([0.8]*dim))
+        # self.tau = jnp.log(jnp.array([0.8]*dim))
+        tau = jnp.array([0.8]*dim)
+        self.tau = jnp.log(tau / (1-tau))
         self.dim = dim
 
     def __call__(self, x: jax.Array) -> jax.Array:
@@ -238,5 +224,5 @@ class LI(eqx.Module):
         Input: (L/T, H)
         Output: (H)
         """
-        x = apply_ssm(jnp.exp(self.tau), jnp.eye(self.dim), x, bidirectional=False)
+        x = apply_ssm(jax.nn.sigmoid(self.tau), jnp.eye(self.dim), x)
         return x

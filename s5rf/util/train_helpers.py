@@ -1,4 +1,4 @@
-from ..model.classifier import Classifier
+from model.classifier import Classifier
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from functools import partial
+from typing import Any
 
 import wandb
 from tqdm import tqdm
@@ -88,23 +89,25 @@ def cut_mix(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     y = lmbda * y + (1-lmbda) * y[rand_index]
     return x, y
 
-def one_hot(x: np.ndarray) -> np.ndarray:
-    """
-    Input: (B)
-    Output: (B)
-    """
-    x = np.eye(NUM_CLASSES)[x]
-    return x 
+
+def randomly_shift_data(x: jax.Array) -> jax.Array:
+    p = np.random.random((1,), )
+    if p <= 0.2:
+        x = jnp.roll(x, shift=1, axis=-1)
+    elif p >= 0.8: 
+        x = jnp.roll(x, shift=-1, axis=-1)
+    return x
 
 
-def prep_data(x: torch.Tensor, y: torch.Tensor, training: bool, apply_cutmix: bool) -> tuple[jax.Array, jax.Array]:
+def prep_data(x: torch.Tensor, y: torch.Tensor, training: bool, apply_cutmix: bool, apply_random_shift: bool) -> tuple[jax.Array, jax.Array]:
     x = x.numpy()
     y = y.numpy()
-    y = one_hot(y)
     if training and apply_cutmix: 
         x, y = cut_mix(x, y)
     x = jnp.asarray(x)
     y = jnp.asarray(y)
+    if training and apply_random_shift:
+        x = randomly_shift_data(x)
     return x, y
 
 
@@ -123,18 +126,20 @@ def train_step(model: Classifier, train_key, optim, opt_state, x: jax.Array, y: 
 @eqx.filter_jit
 def test_step(model: Classifier, rng_key, x, y):
     loss_value, (logits) = loss_fn(model, rng_key, x, y)
+    avg_spikes = get_avg_spikes(model, x)
     metrics = {
         'loss': loss_value,
         'accuracy': jnp.mean(jnp.argmax(logits, axis=-1) == jnp.argmax(y, axis=-1)),
+        'avg_spikes': avg_spikes,
     }
     return metrics
 
 
 @eqx.filter_jit
-def get_average_spikes(model: Classifier, x: jax.Array, layer: int) -> tuple[jax.Array, jax.Array]:
-    spikes_fn = partial(model.gen_spikes, layer=layer)
-    spikes = jax.vmap(spikes_fn)(x)
-    return (jnp.sum(spikes) / x.shape[0]).astype(jnp.int32), jnp.mean(spikes)
+def get_avg_spikes(model: Classifier, x: jax.Array) -> jax.Array:
+    total_sum_spikes = jax.vmap(model.gen_spikes)(x) # (B, num layers)
+    avg_spikes = total_sum_spikes.mean(axis=0) # second sum to acount for batch size
+    return avg_spikes # (num layers)
 
 
 def train_epoch(
@@ -143,10 +148,11 @@ def train_epoch(
         val_dataloader: DataLoader, 
         test_dataloader: DataLoader, 
         rng_key, 
+        optim,
         opt_state, 
-        track_layer: int,
         apply_cutmix: bool,
-    ):
+        apply_random_shift: bool,
+    ) -> tuple[Classifier, Any, dict, dict, dict]:
     train_metrics = {
         'loss': [],
         'accuracy': [],
@@ -165,41 +171,38 @@ def train_epoch(
     }
     print("training")
     for x, y in tqdm(train_dataloader):
-        x, y = prep_data(x, y, training=True, apply_cutmix=apply_cutmix)
+        x, y = prep_data(x, y, training=True, apply_cutmix=apply_cutmix, apply_random_shift=apply_random_shift)
         rng_key, train_key = jax.random.split(rng_key, num=2)
-        model, opt_state, metric = train_step(model, train_key, opt_state, x, y)
+        model, opt_state, metric = train_step(model, train_key, optim, opt_state, x, y)
         train_metrics['loss'].append(metric['loss'])
         train_metrics['accuracy'].append(metric['accuracy'])
 
     print("validating")
     inference_model = eqx.nn.inference_mode(model)
     for x, y in tqdm(val_dataloader): 
-        x, y = prep_data(x, y, training=False, apply_cutmix=apply_cutmix)
+        x, y = prep_data(x, y, training=False, apply_cutmix=apply_cutmix, apply_random_shift=apply_random_shift)
         metric = test_step(inference_model, rng_key, x, y)
         val_metrics['loss'].append(metric['loss'])
         val_metrics['accuracy'].append(metric['accuracy'])
-
-    num_spikes, avg_spikes = get_average_spikes(model, x, layer=track_layer)
-    val_metrics['num_spikes'] = num_spikes
-    val_metrics['avg_spikes'] = avg_spikes
+        val_metrics['avg_spikes'].append(metric['avg_spikes'])
 
     print("testing")
     for x, y in tqdm(test_dataloader): 
-        x, y = prep_data(x, y, training=False, apply_cutmix=apply_cutmix)
+        x, y = prep_data(x, y, training=False, apply_cutmix=apply_cutmix, apply_random_shift=apply_random_shift)
         metric = test_step(inference_model, rng_key, x, y)
         test_metrics['loss'].append(metric['loss'])
         test_metrics['accuracy'].append(metric['accuracy'])
-    
-    num_spikes, avg_spikes = get_average_spikes(model, x, layer=track_layer)
-    test_metrics['num_spikes'] = num_spikes
-    test_metrics['avg_spikes'] = avg_spikes
+        test_metrics['avg_spikes'].append(metric['avg_spikes'])
+
 
     train_metrics['loss'] = jnp.array(train_metrics['loss']).mean()
     train_metrics['accuracy'] = jnp.array(train_metrics['accuracy']).mean()
     val_metrics['loss'] = jnp.array(val_metrics['loss']).mean()
     val_metrics['accuracy'] = jnp.array(val_metrics['accuracy']).mean()
+    val_metrics['avg_spikes'] = jnp.array(val_metrics['avg_spikes']).mean(axis=0) # (num_layers)
     test_metrics['loss'] = jnp.array(test_metrics['loss']).mean()
     test_metrics['accuracy'] = jnp.array(test_metrics['accuracy']).mean()
+    test_metrics['avg_spikes'] = jnp.array(test_metrics['avg_spikes']).mean(axis=0) # (num_layers)
 
     print(f"Train Loss: {train_metrics['loss']}")
     print(f"Train Acc: {train_metrics['accuracy']}")
@@ -221,49 +224,59 @@ def train(
         optim, 
         opt_state,
         apply_cutmix:bool,
+        apply_random_shift: bool,
         use_wandb:bool,
         wandb_project: str,
     ) -> Classifier:
-    from IPython.display import clear_output
 
     if use_wandb:
         wandb.init(project=wandb_project)
 
     track_layer = 0
     for epoch in range(epochs):
-        if (epoch % 5) == 0: 
-            clear_output(wait=True)
         print(f"Epoch: {epoch+1}/{epochs}")
-        model, opt_state, train_metrics, val_metrics, test_metrics = train_epoch(model, train_dataloader, val_dataloader, test_dataloader, rng_key, optim, opt_state, track_layer, apply_cutmix)
+        model, opt_state, train_metrics, val_metrics, test_metrics = train_epoch(
+            model, 
+            train_dataloader, 
+            val_dataloader, 
+            test_dataloader, 
+            rng_key, 
+            optim, 
+            opt_state, 
+            apply_cutmix, 
+            apply_random_shift
+        )
+        
+        logs = {
+            "Train Loss": train_metrics['loss'], 
+            "Train Accuracy": train_metrics['accuracy'], 
+            "Val Loss": val_metrics['loss'], 
+            "Val Accuracy": val_metrics['accuracy'],
+            "Test Loss": test_metrics['loss'], 
+            "Test Accuracy": test_metrics['accuracy'],
+            "Max Lambda real": -jnp.exp(model.neuron_layers[track_layer].Lambda[...,0].min()),
+            "Min Lambda real": -jnp.exp(model.neuron_layers[track_layer].Lambda[...,0].max()),
+            "Max Lambda imag": model.neuron_layers[track_layer].Lambda[...,1].max(),
+            "Min Lambda imag": model.neuron_layers[track_layer].Lambda[...,1].min(),
+            "Max B real": model.dense_layers[track_layer].B[...,0].max(),
+            "Min B real": model.dense_layers[track_layer].B[...,0].min(),
+            "Max B imag": model.dense_layers[track_layer].B[...,1].max(),
+            "Min B imag": model.dense_layers[track_layer].B[...,1].min(),
+            "Max Delta": jnp.exp(model.neuron_layers[track_layer].log_step.max()),
+            "Min Delta": jnp.exp(model.neuron_layers[track_layer].log_step.min()),
+            "Learning Rate Standard": opt_state.inner_states['standard'].inner_state.hyperparams['learning_rate'],
+            "Learning Rate SSM": opt_state.inner_states['ssm'].inner_state.hyperparams['learning_rate'],
+            "Max Tau": jnp.exp(model.li.tau.max()),
+            "Min Tau": jnp.exp(model.li.tau.min()),
+        }
+        for i in range(test_metrics['avg_spikes'].shape[0]):
+            if 'avg_spikes' in logs.keys():
+                # should only not be in keys on SHD
+                logs[f'Val Avg Spikes Layer {i}'] = val_metrics['avg_spikes'][i]
+            logs[f'Test Avg Spikes Layer {i}'] = test_metrics['avg_spikes'][i]
         
         if use_wandb:
-            wandb.log({
-                "Train Loss": train_metrics['loss'], 
-                "Train Accuracy": train_metrics['accuracy'], 
-                "Val Loss": val_metrics['loss'], 
-                "Val Accuracy": val_metrics['accuracy'],
-                "Test Loss": test_metrics['loss'], 
-                "Test Accuracy": test_metrics['accuracy'],
-                "Max Lambda real": -jnp.exp(model.neuron_layers[track_layer].Lambda[...,0].min()),
-                "Min Lambda real": -jnp.exp(model.neuron_layers[track_layer].Lambda[...,0].max()),
-                "Max Lambda imag": model.neuron_layers[track_layer].Lambda[...,1].max(),
-                "Min Lambda imag": model.neuron_layers[track_layer].Lambda[...,1].min(),
-                "Max C real": model.dense_layers[track_layer].C[...,0].max(),
-                "Min C real": model.dense_layers[track_layer].C[...,0].min(),
-                "Max C imag": model.dense_layers[track_layer].C[...,1].max(),
-                "Min C imag": model.dense_layers[track_layer].C[...,1].min(),
-                "Max Delta": jnp.exp(model.neuron_layers[track_layer].log_step.max()),
-                "Min Delta": jnp.exp(model.neuron_layers[track_layer].log_step.min()),
-                "Val Num Spikes": val_metrics['num_spikes'], 
-                "Val Avg Spikes": val_metrics['avg_spikes'],
-                "Test Num Spikes": test_metrics['num_spikes'], 
-                "Test Avg Spikes": test_metrics['avg_spikes'],
-                "Learning Rate Standard": opt_state.inner_states['standard'].inner_state.hyperparams['learning_rate'],
-                "Learning Rate SSM": opt_state.inner_states['ssm'].inner_state.hyperparams['learning_rate'],
-                "Max Tau": jnp.exp(model.li.tau.max()),
-                "Min Tau": jnp.exp(model.li.tau.min()),
-                }
-            )
+            wandb.log(logs)
 
     if use_wandb:
         wandb.finish()

@@ -23,7 +23,7 @@ def complex_to_real(x: jax.Array) -> jax.Array:
     return jnp.stack([x.real, x.imag], axis=-1)
 
 
-def init_VinvCV(rng_key, C_init_fn: Callable, V: jax.Array, Vinv: jax.Array) -> jax.Array:
+def init_dense_VinvB(rng_key, C_init_fn: Callable, in_dim:int, out_dim:int, Vinv: jax.Array) -> jax.Array:
     """
     Initializes C: Vinv @ weight @ V
     Input:
@@ -34,12 +34,11 @@ def init_VinvCV(rng_key, C_init_fn: Callable, V: jax.Array, Vinv: jax.Array) -> 
     Output:
         C: (real): (P, H, 2)
     """
-    in_dim = V.shape[0]
-    out_dim = Vinv.shape[1]
-
+    assert out_dim == Vinv.shape[1]
+    
     C = C_init_fn(rng_key, (out_dim, in_dim, 2))
     C = real_to_complex(C)
-    C = Vinv @ C @ V
+    C = Vinv @ C
     C = complex_to_real(C)
     return C
 
