@@ -1,7 +1,5 @@
 # S5-RF: Scaling Up Resonate-and-Fire Networks for Fast Deep Learning
 
-Code to the paper.
-
 The S5-RF combines the Resonate-and-Fire (RF) neuron with the SSM [S5](https://github.com/lindermanlab/S5) by leveraging the frequency and decay initialization and the parallel scan as efficient computation algorithm.
 With a discretization adjusted for spikes, the S5-RF achieves state-of-the-art results on SSC for recurrent SNNs and results comparable to LIF neurons on other spiking and non-spiking benchmarks. By dropping the refractory period, training on GPU could be drastically minimized while still mainting a favorable sparse outputs. 
 
@@ -36,3 +34,21 @@ source bin/run_sMNIST.sh
 from the `s5rf` directory. This downloads the benchmark's data and trains a S5-RF model with the parameters provided. Results are logged by wandb.
 Similar customizable scripts exist for the other benchmark datasets under `./s5rf/bin/`. 
 
+## Cite
+If you find this work helpful, please cite as
+```bibtex
+@inproceedings{huber2024scaling
+    author = {Huber, Thomas and Lecomte, Jules and Polovnikov, Borislav and von Arnim, Axel},
+    title = {Scaling Up Resonate-and-Fire Networks for Fast Deep Learning},
+    booktitle = {Computer Vision - ECCV 2024},
+    journal = {Springer Nature},
+    series = {Lecture Notes in Computer Science},
+    volume = {15059},
+    year = {2024},
+    month = oct,
+    doi = {https://doi.org/10.1007/978-3-031-92460-6_15},
+    keywords = {Spiking Neural Networks · Resonate-and-Fire Neuron · State
+Space Models · Bio-Inspired Computational Methods},
+    url = {https://link.springer.com/chapter/10.1007/978-3-031-92460-6_15},
+}
+```
