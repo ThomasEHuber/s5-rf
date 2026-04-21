@@ -38,7 +38,7 @@ Similar customizable scripts exist for the other benchmark datasets under `./s5r
 If you find this work helpful, please cite as
 ```bibtex
 @inproceedings{huber2024scaling
-    author = {Huber, Thomas and Lecomte, Jules and Polovnikov, Borislav and von Arnim, Axel},
+    author = {Huber, Thomas E and Lecomte, Jules and Polovnikov, Borislav and von Arnim, Axel},
     title = {Scaling Up Resonate-and-Fire Networks for Fast Deep Learning},
     booktitle = {Computer Vision - ECCV 2024},
     journal = {Springer Nature},
